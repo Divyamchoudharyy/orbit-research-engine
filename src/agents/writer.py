@@ -1,7 +1,7 @@
 import os
 from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
-from src.graph.state import ReasearchState
+from src.graph.state import ResearchState
 from src.api.stream_manager import stream_manager
 
 _SYSTEM_PROMPT = """You are an expert research report writer. Synthesize the provided research findings into a 
@@ -36,7 +36,7 @@ Rules:
 """
 
 
-def writer_node(state: ReasearchState) -> dict:
+def writer_node(state: ResearchState) -> dict:
     job_id = state.get("job_id")
     if job_id:
         stream_manager.publish(job_id,{
