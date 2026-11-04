@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: orbit-research-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false          # "sync: false" means Render will ask you to enter it manually in the dashboard
+      - key: TAVILY_API_KEY
+        sync: false
+      - key: LANGSMITH_API_KEY
+        sync: false
+      - key: LANGSMITH_PROJECT
+        value: orbit-research-engine
+      - key: LANGSMITH_TRACING_V2
+        value: "true"
