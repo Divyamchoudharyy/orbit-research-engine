@@ -356,6 +356,4 @@ LangGraph re-executes a node from the top when resuming after `interrupt()`. If 
 
 ---
 
-## License and upstream attribution
 
-This repository is an independently renamed working copy based on the source snapshot of [noviciusss/Argus](https://github.com/noviciusss/Argus). The upstream README states “MIT”, but the ZIP snapshot supplied for this transformation did not contain a `LICENSE` file. The original attribution and licensing status are documented in [UPSTREAM_NOTICE.md](UPSTREAM_NOTICE.md). Confirm the upstream license with its author and include the full license text before publicly redistributing the derived source.
