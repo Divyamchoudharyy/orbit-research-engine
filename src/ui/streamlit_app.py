@@ -5,11 +5,15 @@ import time
 import requests
 import streamlit as st
 
+from src.ui.auth import password_matches
+
 API_BASE = os.getenv("API_BASE", "http://localhost:8000").rstrip("/")
 if not API_BASE.startswith(("http://", "https://")):
     API_BASE = f"https://{API_BASE}"
 API_KEY = os.getenv("ORBIT_API_KEY", "")
 API_HEADERS = {"Authorization": f"Bearer {API_KEY}"} if API_KEY else {}
+UI_PASSWORD = os.getenv("ORBIT_UI_PASSWORD")
+ORBIT_ENV = os.getenv("ORBIT_ENV", "development").strip().lower()
 
 
 def reset_job_state():
@@ -35,6 +39,23 @@ st.set_page_config(
 
 st.title("🔬 ORBIT — Deep Research Engine")
 st.caption("Multi-agent research pipeline: Planner → Researcher → Critic → Writer")
+
+if ORBIT_ENV == "production" and not UI_PASSWORD:
+    st.error("ORBIT_UI_PASSWORD must be configured for the production UI.")
+    st.stop()
+
+if UI_PASSWORD and not st.session_state.get("ui_authenticated", False):
+    with st.form("orbit_login"):
+        st.subheader("Private ORBIT access")
+        submitted_password = st.text_input("Access password", type="password")
+        submitted = st.form_submit_button("Sign in")
+    if submitted:
+        if password_matches(submitted_password, UI_PASSWORD):
+            st.session_state.ui_authenticated = True
+            st.rerun()
+        else:
+            st.error("Incorrect access password.")
+    st.stop()
 
 with st.sidebar:
     st.header("Settings")
