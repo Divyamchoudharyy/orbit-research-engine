@@ -31,7 +31,7 @@ Optional tracing variables: `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT`, and `LANGS
 
 ## Render Blueprint
 
-The root `render.yaml` describes two web services and a managed PostgreSQL database.
+The root `render.yaml` describes two web services and a managed PostgreSQL database. Both services use Render's `checksPass` auto-deploy trigger so deploys wait for repository CI checks to pass.
 
 1. Push the deployment branch and create a Render Blueprint from this repository.
 2. Configure the prompted secrets. Set the **same** `ORBIT_API_KEY` on both services. Set `ORBIT_UI_PASSWORD` only on `orbit-ui`.
@@ -40,7 +40,7 @@ The root `render.yaml` describes two web services and a managed PostgreSQL datab
 5. Wait for the API `/ready` health check and Streamlit service to become healthy.
 6. Open the Streamlit service URL and submit a short Quick research query.
 
-The UI's `API_BASE` is linked to the API service host. The UI normalizes that host to HTTPS and adds the Bearer token to API requests. `/health` and `/ready` remain unauthenticated for platform health probes; all research/job endpoints require the API key.
+The UI's `API_BASE` and the API's allowed CORS origin are linked to each service's Render-assigned public URL. The UI adds the Bearer token to API requests. `/health` and `/ready` remain unauthenticated for platform health probes; all research/job endpoints require the API key.
 
 ## Docker Compose (local integration check)
 
