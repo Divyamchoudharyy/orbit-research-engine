@@ -2,7 +2,7 @@ databases:
   - name: orbit-postgres
     databaseName: orbit
     user: orbit
-    plan: basic-256mb
+    plan: 0.1c-256mb
 
 services:
   - type: web
@@ -10,7 +10,7 @@ services:
     runtime: docker
     dockerfilePath: ./Dockerfile
     dockerCommand: python -m uvicorn src.api.main:app --host 0.0.0.0 --port $PORT --workers 1
-    plan: starter
+    plan: 0.5c-512mb
     healthCheckPath: /ready
     envVars:
       - key: ORBIT_ENV
@@ -32,7 +32,10 @@ services:
       - key: LANGSMITH_TRACING_V2
         value: "false"
       - key: CORS_ORIGINS
-        value: https://orbit-ui.onrender.com
+        fromService:
+          name: orbit-ui
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL
 
   - type: web
     name: orbit-ui
@@ -44,9 +47,9 @@ services:
     envVars:
       - key: API_BASE
         fromService:
-          type: web
           name: orbit-api
-          property: host
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL
       - key: ORBIT_API_KEY
         sync: false
       - key: ORBIT_UI_PASSWORD
