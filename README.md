@@ -271,15 +271,20 @@ python -m pip install -r requirements-dev.txt
 
 > The pipeline runs in FastAPI's built-in thread pool. For tests, install `requirements-dev.txt` and run `python -m pytest tests/ -v`.
 
-### Full Stack with Docker
+### Full Stack with Docker Compose
 
 ```bash
-docker-compose up --build
+cp .env.example .env
+# Add GROQ_API_KEY, TAVILY_API_KEY and a strong ORBIT_API_KEY.
+# ORBIT_UI_PASSWORD is optional locally; required for production UI access.
+docker compose up --build
 ```
 
-Starts PostgreSQL, FastAPI, and Streamlit. The HTTP API currently runs jobs through FastAPI BackgroundTasks; Celery task wrappers are present but are not wired into the HTTP submission route.
+Starts PostgreSQL, FastAPI, and Streamlit. Research/job endpoints require an `Authorization: Bearer <ORBIT_API_KEY>` header; the Streamlit UI sends it automatically. In production, the Streamlit UI also requires `ORBIT_UI_PASSWORD`. The API runs as a single Uvicorn worker because job execution and SSE fan-out are process-local.
 
 - UI: `http://localhost:8501` | API docs: `http://localhost:8000/docs`
+- Liveness: `http://localhost:8000/health` | Readiness: `http://localhost:8000/ready`
+- See [DEPLOYMENT.md](DEPLOYMENT.md) for Render setup, secrets, smoke tests, and operational boundaries.
 
 ### Switch to PostgreSQL
 
@@ -303,6 +308,7 @@ Both the jobs table and LangGraph checkpointer switch automatically when the Pos
 | `LANGSMITH_TRACING_V2` | Recommended | Set to `true` |
 | `DATABASE_URL` | Optional | PostgreSQL connection string; falls back to SQLite |
 | `ORBIT_API_KEY` | Required in production | Shared Bearer token for protected API routes |
+| `ORBIT_UI_PASSWORD` | Required in production | Shared password gate for the Streamlit UI |
 | `ORBIT_UI_PASSWORD` | Required in production | Shared password gate for the Streamlit UI |
 | `ORBIT_ENV` | Optional | Set to `production` to enforce API-key configuration |
 | `CORS_ORIGINS` | Optional | Comma-separated allowed browser origins |
