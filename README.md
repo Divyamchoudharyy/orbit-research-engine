@@ -1,6 +1,6 @@
 # ORBIT - Autonomous Deep Research Engine
 
-> A **production-grade multi-agent research pipeline** that autonomously plans, researches, critiques, and synthesizes comprehensive cited reports from any research query -- with real-time streaming logs and human-in-the-loop review.
+> A **multi-agent research prototype and portfolio project** that autonomously plans, researches, critiques, and synthesizes comprehensive cited reports from any research query -- with real-time streaming logs and human-in-the-loop review.
 
 [![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115-green.svg)](https://fastapi.tiangolo.com)
@@ -20,7 +20,7 @@ ORBIT accepts a research query via REST API and runs a **supervisor-orchestrated
 4. **Pauses for human review** -- a Human-in-the-Loop gate fires at the critique boundary, letting the user continue or finalize
 5. **Writes** -- synthesizes a structured markdown report with numbered citations
 
-The pipeline runs **asynchronously** -- the API returns a `job_id` immediately. **Real-time agent logs stream via SSE** to the Streamlit dashboard. Every LLM call is traced in LangSmith.
+The pipeline runs **asynchronously** -- the API returns a `job_id` immediately. **Real-time agent logs stream via SSE** to the Streamlit dashboard. LLM calls can be traced in LangSmith when tracing is enabled.
 
 ---
 
@@ -134,7 +134,7 @@ stateDiagram-v2
     supervisor --> [*] : next_agent = END
 ```
 
-> **Hard cap**: `research_iterations >= 3` bypasses HIL and routes directly to `writer` (`auto_capped`), preventing infinite loops regardless of LLM decisions.
+> **Hard cap**: `research_rounds >= max_research_rounds` bypasses another HIL cycle and routes directly to `writer` (`auto_capped`), preventing unbounded follow-up loops.
 
 ---
 
@@ -148,10 +148,10 @@ stateDiagram-v2
 | Paper search | ArXiv | Direct Python library |
 | General knowledge | Wikipedia | Fast encyclopedic background |
 | REST API | FastAPI + uvicorn | Async-native, OpenAPI docs auto-generated |
-| Async tasks | FastAPI BackgroundTasks | Zero extra deps, thread-pool executor |
+| Job execution | FastAPI BackgroundTasks | Simple in-process execution; restart recovery is limited |
 | Real-time logs | SSE via sse-starlette | Push agent logs to UI without polling |
-| Persistence | SQLite / PostgreSQL | Zero infra locally; auto-switches via `DATABASE_URL` |
-| Observability | LangSmith | Per-agent token counts, latency, tool traces |
+| Persistence | SQLite / PostgreSQL | Jobs and LangGraph checkpoints use the configured database |
+| Observability | LangSmith | Optional traces when configured |
 | Rate limiting | slowapi | 5 req/IP/hour on `POST /research` |
 | UI | Streamlit | SSE log streaming, HIL review panel, report render |
 
@@ -165,7 +165,7 @@ ORBIT/
     +-- api/
     |   +-- main.py               # FastAPI app, CORS, lifespan, startup recovery
     |   +-- models.py             # Pydantic request/response models
-    |   +-- celery_app.py         # Celery config (Docker/production)
+    |   +-- celery_app.py         # Optional Celery app configuration
     |   +-- stream_manager.py     # Thread-safe SSE pub/sub via asyncio.Queue
     |   +-- routes/
     |       +-- research.py       # All job routes + BackgroundTasks + SSE stream
@@ -184,7 +184,7 @@ ORBIT/
     |   +-- db.py                 # Dual-dialect CRUD -- SQLite or PostgreSQL
     |   +-- checkpointer.py       # Dynamic SqliteSaver / PostgresSaver
     +-- tasks/
-    |   +-- research_tasks.py     # Celery task wrappers (Docker / production)
+    |   +-- research_tasks.py     # Optional Celery task entry points
     +-- ui/
         +-- streamlit_app.py      # SSE streaming, HIL panel, report render
 ```
@@ -260,7 +260,7 @@ py -3.11 -m venv .venv
 
 # Configure API keys and install dependencies
 Copy-Item .env.example .env
-python -m pip install -r requirements.txt
+python -m pip install -r requirements-dev.txt
 
 # Terminal 1 -- FastAPI
 .venv\Scripts\python.exe -m uvicorn src.api.main:app --reload --port 8000
@@ -269,7 +269,7 @@ python -m pip install -r requirements.txt
 .venv\Scripts\python.exe -m streamlit run src/ui/streamlit_app.py
 ```
 
-> No Redis or Celery needed locally. The pipeline runs in FastAPI's built-in thread pool.
+> The pipeline runs in FastAPI's built-in thread pool. For tests, install `requirements-dev.txt` and run `python -m pytest tests/ -v`.
 
 ### Full Stack with Docker
 
@@ -277,7 +277,7 @@ python -m pip install -r requirements.txt
 docker-compose up --build
 ```
 
-Starts PostgreSQL, Redis, Celery worker, FastAPI, and Streamlit.
+Starts PostgreSQL, FastAPI, and Streamlit. The HTTP API currently runs jobs through FastAPI BackgroundTasks; Celery task wrappers are present but are not wired into the HTTP submission route.
 
 - UI: `http://localhost:8501` | API docs: `http://localhost:8000/docs`
 
@@ -288,7 +288,7 @@ Starts PostgreSQL, Redis, Celery worker, FastAPI, and Streamlit.
 DATABASE_URL=postgresql://postgres:secret@localhost:5432/orbit
 ```
 
-Both the jobs table and LangGraph checkpointer switch automatically. No code changes needed.
+Both the jobs table and LangGraph checkpointer switch automatically when the PostgreSQL drivers are installed.
 
 ---
 
@@ -326,7 +326,7 @@ LangGraph re-executes a node from the top when resuming after `interrupt()`. If 
 <details>
 <summary><strong>Why FastAPI BackgroundTasks instead of Celery/Redis locally?</strong></summary>
 
-`BackgroundTasks` runs sync functions in a thread-pool executor -- zero extra infrastructure. Trade-off: if the server restarts mid-research, the job is lost (status stays "running"). For Docker/production, `docker-compose.yml` switches to Celery + Redis. The Celery wrappers in `src/tasks/research_tasks.py` are kept for that path.
+`BackgroundTasks` runs sync functions in a thread-pool executor -- zero extra infrastructure. Trade-off: if the server restarts mid-research, an active job can remain marked `running`. The shared execution service also exposes Celery task entry points, but the HTTP submission route currently uses `BackgroundTasks`; cross-process SSE delivery is not implemented yet.
 
 </details>
 
@@ -346,7 +346,7 @@ LangGraph re-executes a node from the top when resuming after `interrupt()`. If 
 | Rate limiting (slowapi) | Done |
 | SSE real-time log streaming | Done |
 | PostgreSQL support | Done |
-| Redis + Celery | In codebase, activated via Docker |
+| Celery task wrappers | Available but not wired to HTTP submission |
 | LLM-as-Judge evaluation | Planned |
 | Authentication (API keys) | Planned |
 | Report caching (same query, 24h) | Planned |
@@ -357,3 +357,26 @@ LangGraph re-executes a node from the top when resuming after `interrupt()`. If 
 ---
 
 
+
+
+## Reliability Notes
+
+- Human-review decisions are claimed atomically in the database. A human response and an automatic timeout cannot both win the same pending decision.
+- Research graph execution and resume logic are shared between the API and Celery task entry points.
+- SQLite is suitable for local development and a single API process. For concurrent deployments, configure PostgreSQL.
+- SSE fan-out is process-local. If research is moved to separate Celery worker processes, cross-process SSE delivery requires a Redis-backed event transport; the current HTTP route uses in-process FastAPI BackgroundTasks.
+- A process restart during an active, non-HIL BackgroundTask can leave a job marked `running`. Durable queue dispatch and lease-based recovery are follow-up work; do not treat the current BackgroundTasks mode as crash-proof.
+- The current tests mock model/search calls. They verify orchestration and persistence behavior, not the accuracy of live research results or external provider availability.
+
+## Test Suite
+
+```bash
+python -m pip install -r requirements-dev.txt
+python -m pytest tests/ -v
+```
+
+The test suite uses mocked agent/tool responses and does not require live Groq or Tavily credentials.
+
+## Source and Licensing
+
+See [UPSTREAM_NOTICE.md](UPSTREAM_NOTICE.md) for the source-provenance and licensing note. Confirm the applicable license and preserve any required notices before redistributing the project.

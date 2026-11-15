@@ -37,3 +37,7 @@ project-upgrade-plan.md
 # Frontend dependencies and build output
 node_modules/
 .next/
+
+.ruff_cache/
+.mypy_cache/
+.coverage
