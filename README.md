@@ -303,6 +303,7 @@ Both the jobs table and LangGraph checkpointer switch automatically when the Pos
 | `LANGSMITH_TRACING_V2` | Recommended | Set to `true` |
 | `DATABASE_URL` | Optional | PostgreSQL connection string; falls back to SQLite |
 | `ORBIT_API_KEY` | Required in production | Shared Bearer token for protected API routes |
+| `ORBIT_UI_PASSWORD` | Required in production | Shared password gate for the Streamlit UI |
 | `ORBIT_ENV` | Optional | Set to `production` to enforce API-key configuration |
 | `CORS_ORIGINS` | Optional | Comma-separated allowed browser origins |
 | `ORBIT_DATA_DIR` | Optional | Persistent directory for SQLite database files |
@@ -369,7 +370,7 @@ LangGraph re-executes a node from the top when resuming after `interrupt()`. If 
 - Research graph execution and resume logic are shared between the API and Celery task entry points.
 - SQLite is suitable for local development and a single API process. For concurrent deployments, configure PostgreSQL.
 - SSE fan-out is process-local. If research is moved to separate Celery worker processes, cross-process SSE delivery requires a Redis-backed event transport; the current HTTP route uses in-process FastAPI BackgroundTasks.
-- A process restart during an active, non-HIL BackgroundTask can leave a job marked `running`. Durable queue dispatch and lease-based recovery are follow-up work; do not treat the current BackgroundTasks mode as crash-proof.
+- A process restart during an active job causes pending/running jobs to be marked `failed` at startup; interrupted work must be resubmitted. Durable queue dispatch and automatic replay are not implemented.
 - The current tests mock model/search calls. They verify orchestration and persistence behavior, not the accuracy of live research results or external provider availability.
 
 ## Test Suite
