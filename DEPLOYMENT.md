@@ -17,6 +17,7 @@ Set these values in the deployment provider's secret/environment settings:
 - `GROQ_API_KEY`
 - `TAVILY_API_KEY`
 - `ORBIT_API_KEY`: a long random secret shared by the API and Streamlit services.
+- `ORBIT_UI_PASSWORD`: a separate password protecting the public Streamlit URL.
 
 Generate a secret locally with:
 
@@ -33,7 +34,7 @@ Optional tracing variables: `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT`, and `LANGS
 The root `render.yaml` describes two web services and a managed PostgreSQL database.
 
 1. Push the deployment branch and create a Render Blueprint from this repository.
-2. Configure the prompted secrets for both services. Set the **same** `ORBIT_API_KEY` value on `orbit-api` and `orbit-ui`.
+2. Configure the prompted secrets. Set the **same** `ORBIT_API_KEY` on both services and set `ORBIT_UI_PASSWORD` on the UI service (and API service if prompted).
 3. Set `GROQ_API_KEY` and `TAVILY_API_KEY` on `orbit-api`.
 4. Review the database and service plans/costs before applying the Blueprint.
 5. Wait for the API `/ready` health check and Streamlit service to become healthy.
@@ -70,7 +71,7 @@ Compose uses PostgreSQL with a named persistent volume. The development fallback
 
 ## Operational boundaries
 
-- API key authentication protects the research and job endpoints. It is a shared-secret access gate, not per-user identity, tenant isolation, or role-based authorization.
+- API key authentication protects the research and job endpoints. The Streamlit UI also requires a shared access password in production. These are shared-secret gates, not per-user identity, tenant isolation, or role-based authorization.
 - Rate limiting uses the current in-process SlowAPI storage. It is appropriate only for the single API instance described here.
 - Research runs in FastAPI BackgroundTasks. If the process stops mid-run, startup marks pending/running jobs as failed rather than leaving them stuck. Users must resubmit interrupted work; automatic replay is not implemented.
 - HIL timeout recovery is process-local plus startup recovery. It is not a distributed scheduler.
