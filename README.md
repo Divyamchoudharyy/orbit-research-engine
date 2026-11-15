@@ -302,6 +302,10 @@ Both the jobs table and LangGraph checkpointer switch automatically when the Pos
 | `LANGSMITH_PROJECT` | Recommended | e.g. `orbit-research-engine` |
 | `LANGSMITH_TRACING_V2` | Recommended | Set to `true` |
 | `DATABASE_URL` | Optional | PostgreSQL connection string; falls back to SQLite |
+| `ORBIT_API_KEY` | Required in production | Shared Bearer token for protected API routes |
+| `ORBIT_ENV` | Optional | Set to `production` to enforce API-key configuration |
+| `CORS_ORIGINS` | Optional | Comma-separated allowed browser origins |
+| `ORBIT_DATA_DIR` | Optional | Persistent directory for SQLite database files |
 | `REDIS_URL` | Docker only | `redis://redis:6379/0` |
 | `API_BASE` | Docker only | `http://api:8000` |
 
@@ -348,7 +352,7 @@ LangGraph re-executes a node from the top when resuming after `interrupt()`. If 
 | PostgreSQL support | Done |
 | Celery task wrappers | Available but not wired to HTTP submission |
 | LLM-as-Judge evaluation | Planned |
-| Authentication (API keys) | Planned |
+| Authentication (shared API key) | Implemented |
 | Report caching (same query, 24h) | Planned |
 | PDF export | Planned |
 
