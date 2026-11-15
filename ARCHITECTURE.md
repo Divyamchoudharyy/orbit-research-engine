@@ -1,38 +1,47 @@
-# ORBIT — Current Architecture
+# ORBIT — Architecture and Operational Boundaries
 
-This document describes the architecture inherited in the initial ORBIT source snapshot. It is a baseline, not a claim that every component is production-hardened.
+ORBIT is a multi-agent research prototype. This document describes the current implementation and distinguishes implemented behavior from deployment limitations.
 
 ## Request lifecycle
 
-1. The Streamlit client submits a research request to FastAPI.
-2. FastAPI creates a job record and schedules the research workflow.
-3. LangGraph orchestrates the supervisor, planner, researcher, critic, human-review gate, and writer nodes.
-4. Research tools gather web, arXiv, and Wikipedia material.
-5. The graph can pause for a human decision and resume from a checkpoint.
-6. The writer generates a Markdown report and returns source URLs.
-7. The client observes job status and receives progress events through Server-Sent Events (SSE).
+1. The FastAPI endpoint validates the query and depth, creates a job record, and schedules a background task.
+2. `src/services/research_runner.py` creates the complete LangGraph initial state and runs the compiled graph.
+3. The supervisor routes work through planner, researcher, critic, the HIL gate, and writer.
+4. When the graph interrupts for human review, the job is persisted as `awaiting_human` with its gaps and expiration time.
+5. The user can submit `continue` or `finalize`. The database atomically changes the job from `awaiting_human` to `running` and appends the audit event before the graph is resumed.
+6. The timeout and startup-recovery paths use the same atomic claim operation with `auto_finalize`, preventing duplicate human/timeout decisions.
+7. The result, sources, status, and research-iteration count are persisted for the result endpoint.
 
-## Current modules
+## Main modules
 
-- `src/agents/`: specialized agent nodes and routing logic.
-- `src/graph/`: shared graph state and graph construction.
-- `src/tools/`: web, arXiv, and Wikipedia integrations.
-- `src/api/`: FastAPI app, routes, rate limiting, streaming, and Celery configuration.
-- `src/persistence/`: job persistence and LangGraph checkpointer selection.
-- `src/tasks/`: Celery task wrappers.
-- `src/ui/`: Streamlit research interface.
+- `src/agents/`: supervisor, planner, researcher, critic, HIL gate, and writer nodes.
+- `src/graph/`: typed graph state, graph construction, and complete initial-state factory.
+- `src/services/research_runner.py`: shared initial-run and resume execution used by API and Celery entry points.
+- `src/api/`: FastAPI routes, request/response models, rate limiting, startup recovery, and process-local SSE fan-out.
+- `src/persistence/db.py`: SQLite/PostgreSQL job persistence, additive schema migrations, and atomic HIL decision claims.
+- `src/persistence/checkpointer.py`: process-local LangGraph SQLite/PostgreSQL checkpointer.
+- `src/tasks/`: optional Celery task wrappers.
+- `src/ui/`: Streamlit interface.
 
-## Infrastructure
+## Persistence
 
-- LLM provider: Groq, configured through `GROQ_API_KEY`.
-- Web research: Tavily, configured through `TAVILY_API_KEY`.
-- Optional tracing: LangSmith.
-- Local persistence: SQLite.
-- Optional database and worker services: PostgreSQL and Redis/Celery through Docker Compose.
-- API: FastAPI; UI: Streamlit.
+- Local development defaults to SQLite.
+- Configure `DATABASE_URL` to use PostgreSQL for job records and LangGraph checkpoints.
+- PostgreSQL job records use `psycopg2`; PostgreSQL LangGraph checkpoints use `psycopg` v3 and `langgraph-checkpoint-postgres`.
+- The SQLite checkpointer is intended for lightweight, single-process development. Prefer PostgreSQL for concurrent deployments.
 
-## Known baseline constraints
+## Operational limitations
 
-The initial snapshot has an unpinned `requirements.txt`. PostgreSQL checkpointer support imports additional packages that are not all declared in the supplied dependency file. The default local path and Docker path should be validated before relying on PostgreSQL/Celery in production. Automated evaluation, authentication, robust evidence-to-citation mapping, and comprehensive tests are not yet part of this baseline.
+- The HTTP API currently runs jobs using FastAPI `BackgroundTasks`. If the API process stops during an active job, the job may remain marked `running`; active-job lease recovery is not implemented.
+- Celery task wrappers share the same execution service, but the HTTP submission route does not currently enqueue Celery tasks.
+- SSE fan-out uses in-process asyncio queues. Events published from a separate Celery process are not delivered to the API process; cross-process Redis Pub/Sub is not implemented.
+- The timeout thread is process-local. Startup recovery restores pending HIL timers when the API starts, but this is not a substitute for a durable distributed scheduler.
+- Automated tests mock model and search calls. They verify routing, HIL persistence, and local event fan-out, not live provider quality, rate limits, or end-to-end deployment behavior.
+- Authentication and authorization are not implemented. Do not expose the API publicly without an appropriate access-control layer and restrictive CORS configuration.
 
-These are intentional items for the ORBIT upgrade roadmap.
+## Test commands
+
+```bash
+python -m pip install -r requirements-dev.txt
+python -m pytest tests/ -v
+```

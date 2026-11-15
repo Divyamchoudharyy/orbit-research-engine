@@ -17,3 +17,5 @@ sse-starlette
 celery
 redis
 psycopg2-binary
+langgraph-checkpoint-postgres
+psycopg[binary,pool]

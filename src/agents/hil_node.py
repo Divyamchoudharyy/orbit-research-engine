@@ -2,8 +2,6 @@
 from langgraph.types import interrupt
 
 from src.graph.state import ResearchState
-from src.persistence.db import log_hil_decision
-
 
 def hil_node(state: ResearchState) -> dict:
     """
@@ -28,8 +26,6 @@ def hil_node(state: ResearchState) -> dict:
     research_rounds = state.get("research_rounds", 0)
 
     max_research_rounds = state.get("max_research_rounds", 3)
-
-    job_id = state.get("job_id")
 
     # --------------------------------------------------
     # 2. NO GAPS: SKIP HUMAN REVIEW
@@ -86,19 +82,7 @@ def hil_node(state: ResearchState) -> dict:
         )
 
     # --------------------------------------------------
-    # 6. RECORD HUMAN DECISION
-    # --------------------------------------------------
-
-    if job_id:
-        log_hil_decision(
-            job_id=job_id,
-            iteration=next_round,
-            decision=decision,
-            gaps=gaps,
-        )
-
-    # --------------------------------------------------
-    # 7. RETURN DECISION TO SUPERVISOR
+    # 6. RETURN DECISION TO SUPERVISOR
     # --------------------------------------------------
 
     return {

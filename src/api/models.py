@@ -1,48 +1,56 @@
-from pydantic import BaseModel
-from typing import List, Optional
+from typing import Literal
 
-# _____Request model _____
+from pydantic import BaseModel, Field
+
 
 class ReasearchRequest(BaseModel):
-    query: str
-    depth : str = "standard" # quick, standard, deep
-    
-# _____Response model _____
+    query: str = Field(min_length=1, max_length=10_000)
+    depth: Literal["quick", "standard", "deep"] = "standard"
+
+
 class ReasearchJobResponse(BaseModel):
-    """Returned immediately from POST /research """
+    """Returned immediately from POST /research."""
+
     job_id: str
-    status: str  
-    estimated_seconds :int
-    
+    status: str
+    estimated_seconds: int
+
 
 class JobStatusResponse(BaseModel):
-    """Returned from GET /jobs/{job_id}/status """
+    """Returned from GET /jobs/{job_id}/status."""
+
     job_id: str
-    status: str   #pending, running, completed, failed
+    status: str
     created_at: str
     updated_at: str
 
+
 class HILPayload(BaseModel):
-    gaps: List[str]
+    gaps: list[str]
     iteration: int
     max_iterations: int
     expires_at: str
 
+
 class HILStatusResponse(JobStatusResponse):
-    """Extended JobStatusResponse containing the HIL payload when awaiting_human"""
-    hil_payload: Optional[HILPayload] = None
+    """Job status with a pending human-review payload, when applicable."""
+
+    hil_payload: HILPayload | None = None
+
 
 class HILDecisionRequest(BaseModel):
-    decision: str  # "continue" | "finalize"
-    
+    decision: Literal["continue", "finalize"]
+
+
 class JobResultResponse(BaseModel):
-    """Returned from GET /jobs/{job_id}/result """
+    """Returned from GET /jobs/{job_id}/result."""
+
     job_id: str
     query: str
     status: str
-    report: Optional[str] = None
-    sources: Optional[List[str]] = None
-    agent_turns: Optional[int] = None
-    error: Optional[str] = None
+    report: str | None = None
+    sources: list[str] | None = None
+    agent_turns: int | None = None
+    error: str | None = None
     created_at: str
     updated_at: str

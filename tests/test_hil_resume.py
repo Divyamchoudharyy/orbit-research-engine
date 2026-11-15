@@ -4,7 +4,6 @@ from langgraph.types import Command
 
 from src.graph import pipeline as pipeline_module
 from src.graph.pipeline import build_graph, create_initial_state
-from src.agents import hil_node as hil_module
 
 
 def test_real_human_interrupt_and_resume(monkeypatch):
@@ -94,13 +93,6 @@ def test_real_human_interrupt_and_resume(monkeypatch):
     )
     monkeypatch.setattr(
         pipeline_module, "writer_node", fake_writer
-    )
-
-    # Prevent the test from writing to the real database.
-    monkeypatch.setattr(
-        hil_module,
-        "log_hil_decision",
-        lambda **kwargs: None,
     )
 
     graph = build_graph(
