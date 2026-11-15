@@ -34,7 +34,7 @@ Optional tracing variables: `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT`, and `LANGS
 The root `render.yaml` describes two web services and a managed PostgreSQL database.
 
 1. Push the deployment branch and create a Render Blueprint from this repository.
-2. Configure the prompted secrets. Set the **same** `ORBIT_API_KEY` on both services and set `ORBIT_UI_PASSWORD` on the UI service (and API service if prompted).
+2. Configure the prompted secrets. Set the **same** `ORBIT_API_KEY` on both services. Set `ORBIT_UI_PASSWORD` only on `orbit-ui`.
 3. Set `GROQ_API_KEY` and `TAVILY_API_KEY` on `orbit-api`.
 4. Review the database and service plans/costs before applying the Blueprint.
 5. Wait for the API `/ready` health check and Streamlit service to become healthy.
