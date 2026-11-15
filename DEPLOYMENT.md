@@ -1,0 +1,80 @@
+# ORBIT Deployment Guide
+
+This guide configures ORBIT as a **single-instance, authenticated deployment**. It is suitable for a private portfolio demo or controlled staging environment. It is not a horizontally scalable production architecture.
+
+## Services
+
+- **FastAPI**: accepts research requests, runs the LangGraph workflow, serves status/results and SSE.
+- **Streamlit**: browser UI; sends a Bearer API key to the API.
+- **PostgreSQL**: durable storage for job records and LangGraph checkpoints.
+
+The API intentionally runs with one Uvicorn worker. The current background-job runner and SSE fan-out are process-local, so do not scale the API horizontally or move jobs to separate Celery workers without first implementing a durable queue and shared event transport.
+
+## Required secrets
+
+Set these values in the deployment provider's secret/environment settings:
+
+- `GROQ_API_KEY`
+- `TAVILY_API_KEY`
+- `ORBIT_API_KEY`: a long random secret shared by the API and Streamlit services.
+
+Generate a secret locally with:
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+```
+
+Set `ORBIT_ENV=production`. The API refuses to start in production if `ORBIT_API_KEY` is missing. Never commit `.env`, provider keys, database credentials, or the generated API key.
+
+Optional tracing variables: `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT`, and `LANGSMITH_TRACING_V2`.
+
+## Render Blueprint
+
+The root `render.yaml` describes two web services and a managed PostgreSQL database.
+
+1. Push the deployment branch and create a Render Blueprint from this repository.
+2. Configure the prompted secrets for both services. Set the **same** `ORBIT_API_KEY` value on `orbit-api` and `orbit-ui`.
+3. Set `GROQ_API_KEY` and `TAVILY_API_KEY` on `orbit-api`.
+4. Review the database and service plans/costs before applying the Blueprint.
+5. Wait for the API `/ready` health check and Streamlit service to become healthy.
+6. Open the Streamlit service URL and submit a short Quick research query.
+
+The UI's `API_BASE` is linked to the API service host. The UI normalizes that host to HTTPS and adds the Bearer token to API requests. `/health` and `/ready` remain unauthenticated for platform health probes; all research/job endpoints require the API key.
+
+## Docker Compose (local integration check)
+
+```bash
+cp .env.example .env
+# Edit .env and add real GROQ_API_KEY and TAVILY_API_KEY values.
+# Set ORBIT_API_KEY to a long random secret.
+docker compose up --build
+```
+
+- Streamlit: http://localhost:8501
+- API liveness: http://localhost:8000/health
+- API readiness: http://localhost:8000/ready
+- API docs: http://localhost:8000/docs
+
+Compose uses PostgreSQL with a named persistent volume. The development fallback password and API key are for local use only; replace them before sharing the environment. Do not publish the database port.
+
+## Deployment smoke test
+
+1. Confirm `/health` returns HTTP 200.
+2. Confirm `/ready` returns HTTP 200.
+3. Confirm an API request without a Bearer token returns HTTP 401.
+4. Submit a Quick research job from the Streamlit UI.
+5. Confirm status moves through pending/running to complete (or awaiting_human).
+6. If the job pauses for HIL, test both Continue Researching and Finalize Now.
+7. Fetch the result and verify report text and source URLs.
+8. Restart the API and verify completed jobs remain available in PostgreSQL.
+
+## Operational boundaries
+
+- API key authentication protects the research and job endpoints. It is a shared-secret access gate, not per-user identity, tenant isolation, or role-based authorization.
+- Rate limiting uses the current in-process SlowAPI storage. It is appropriate only for the single API instance described here.
+- Research runs in FastAPI BackgroundTasks. If the process stops mid-run, startup marks pending/running jobs as failed rather than leaving them stuck. Users must resubmit interrupted work; automatic replay is not implemented.
+- HIL timeout recovery is process-local plus startup recovery. It is not a distributed scheduler.
+- SSE events are process-local. Keep one API instance and one worker process.
+- Live Groq/Tavily provider behavior, provider quotas, latency, and research quality must be validated with real credentials.
+- Back up PostgreSQL and configure provider-side monitoring/alerts before relying on this for important work.
+- Do not describe this architecture as highly available or horizontally scalable.
