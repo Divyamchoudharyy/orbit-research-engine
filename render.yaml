@@ -11,6 +11,7 @@ services:
     dockerfilePath: ./Dockerfile
     dockerCommand: python -m uvicorn src.api.main:app --host 0.0.0.0 --port $PORT --workers 1
     plan: 0.5c-512mb
+    autoDeployTrigger: checksPass
     healthCheckPath: /ready
     envVars:
       - key: ORBIT_ENV
