@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 import logging
 import threading
+import os
 
 from dotenv import load_dotenv
 
@@ -15,6 +16,7 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from src.api.limiter import limiter
+from src.api.security import validate_production_configuration
 from src.api.routes.research import (
     router as research_router,
     _run_research_resume,
@@ -25,6 +27,7 @@ from src.persistence.db import (
     claim_hil_decision,
     get_jobs_by_status,
     init_db,
+    update_job_status,
 )
 
 logger = logging.getLogger(__name__)
@@ -42,8 +45,6 @@ def _recover_orphaned_hil_jobs() -> None:
                 if expires_dt.tzinfo is None:
                     expires_dt = expires_dt.replace(tzinfo=timezone.utc)
             else:
-                # A pending review without an expiry cannot be monitored
-                # safely; treat it as expired and finalize through the claim.
                 expires_dt = datetime.min.replace(tzinfo=timezone.utc)
 
             if expires_dt <= datetime.now(timezone.utc):
@@ -61,9 +62,21 @@ def _recover_orphaned_hil_jobs() -> None:
             logger.exception("Could not recover HIL job %s", job_id)
 
 
+def _mark_interrupted_jobs_failed() -> None:
+    """Avoid leaving jobs permanently marked running after a process restart."""
+    for job in get_jobs_by_status("running") + get_jobs_by_status("pending"):
+        update_job_status(
+            job["job_id"],
+            "failed",
+            error="The API restarted before this job completed. Please submit it again.",
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    validate_production_configuration()
     init_db()
+    _mark_interrupted_jobs_failed()
     _recover_orphaned_hil_jobs()
     yield
 
@@ -74,7 +87,7 @@ app = FastAPI(
         "Multi-agent research pipeline: "
         "Planner → Researcher → Critic → Writer"
     ),
-    version="1.1.0",
+    version="1.2.0",
     lifespan=lifespan,
 )
 
@@ -84,11 +97,20 @@ app.add_exception_handler(
     _rate_limit_exceeded_handler,
 )
 
+cors_origins = [
+    origin.strip()
+    for origin in os.getenv(
+        "CORS_ORIGINS",
+        "http://localhost:8501",
+    ).split(",")
+    if origin.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=cors_origins,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+    allow_credentials=False,
 )
 
 app.include_router(health_router)

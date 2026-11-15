@@ -1,13 +1,29 @@
+databases:
+  - name: orbit-postgres
+    databaseName: orbit
+    user: orbit
+    plan: 0.1c-256mb
+
 services:
   - type: web
-    name: orbit-research-api
+    name: orbit-api
     runtime: docker
     dockerfilePath: ./Dockerfile
-    plan: free
-    healthCheckPath: /health
+    dockerCommand: python -m uvicorn src.api.main:app --host 0.0.0.0 --port $PORT --workers 1
+    plan: 0.5c-512mb
+    autoDeployTrigger: checksPass
+    healthCheckPath: /ready
     envVars:
+      - key: ORBIT_ENV
+        value: production
+      - key: ORBIT_API_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: orbit-postgres
+          property: connectionString
       - key: GROQ_API_KEY
-        sync: false          # "sync: false" means Render will ask you to enter it manually in the dashboard
+        sync: false
       - key: TAVILY_API_KEY
         sync: false
       - key: LANGSMITH_API_KEY
@@ -15,4 +31,33 @@ services:
       - key: LANGSMITH_PROJECT
         value: orbit-research-engine
       - key: LANGSMITH_TRACING_V2
-        value: "true"
+        value: "false"
+      - key: CORS_ORIGINS
+        fromService:
+          name: orbit-ui
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL
+
+  - type: web
+    name: orbit-ui
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerCommand: python -m streamlit run src/ui/streamlit_app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true
+    plan: 0.5c-512mb
+    autoDeployTrigger: checksPass
+    healthCheckPath: /_stcore/health
+    envVars:
+      - key: API_BASE
+        fromService:
+          name: orbit-api
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL
+      - key: ORBIT_API_KEY
+        fromService:
+          name: orbit-api
+          type: web
+          envVarKey: ORBIT_API_KEY
+      - key: ORBIT_UI_PASSWORD
+        sync: false
+      - key: ORBIT_ENV
+        value: production

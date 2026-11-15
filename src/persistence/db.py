@@ -13,7 +13,8 @@ IS_POSTGRES = bool(
     and DATABASE_URL.startswith(("postgresql://", "postgres://"))
 )
 
-DB_PATH = Path(__file__).resolve().parents[2] / "data" / "research.db"
+_DEFAULT_DATA_DIR = Path(__file__).resolve().parents[2] / "data"
+DB_PATH = Path(os.getenv("ORBIT_DATA_DIR", str(_DEFAULT_DATA_DIR))) / "research.db"
 
 
 class _Unset:
@@ -133,7 +134,6 @@ def _execute_query(
                 elif fetchone:
                     row = cur.fetchone()
                     rows = dict(row) if row else None
-            # End read transactions too before returning a pooled connection.
             if commit or fetchall or fetchone:
                 conn.commit()
             return rows
@@ -179,11 +179,7 @@ def update_job_status(
     error: str | None | _Unset = _UNSET,
     agent_turns: int | None | _Unset = _UNSET,
 ) -> None:
-    """
-    Update job status without accidentally erasing omitted fields.
-
-    Pass ``result=None`` or ``error=None`` explicitly to clear those fields.
-    """
+    """Update job status without accidentally erasing omitted fields."""
     assignments = ["status=?", "updated_at=?"]
     params: list[Any] = [status, _now()]
 
@@ -200,9 +196,7 @@ def update_job_status(
         params.append(agent_turns)
 
     if status != "awaiting_human":
-        assignments.extend(
-            ["hil_expires_at=NULL", "hil_pending_payload=NULL"]
-        )
+        assignments.extend(["hil_expires_at=NULL", "hil_pending_payload=NULL"])
 
     params.append(job_id)
     _execute_query(
@@ -267,24 +261,13 @@ def set_job_awaiting_human(
         SET status=?, hil_expires_at=?, hil_pending_payload=?, updated_at=?
         WHERE job_id=?
         """,
-        (
-            "awaiting_human",
-            expires_at,
-            json.dumps(payload),
-            now,
-            job_id,
-        ),
+        ("awaiting_human", expires_at, json.dumps(payload), now, job_id),
         commit=True,
     )
 
 
 def claim_hil_decision(job_id: str, decision: str) -> bool:
-    """
-    Atomically claim a pending HIL decision and append its audit event.
-
-    Only one concurrent caller can transition an awaiting_human job to
-    running. ``auto_finalize`` is reserved for timeout/startup recovery.
-    """
+    """Atomically claim a pending HIL decision and append its audit event."""
     allowed = {"continue", "finalize", "auto_finalize"}
     if decision not in allowed:
         raise ValueError(f"Unsupported HIL decision: {decision}")

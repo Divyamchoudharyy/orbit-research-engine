@@ -1,10 +1,23 @@
-import time 
-import requests 
-import streamlit as st
 import os
 import threading
+import time
+
+import requests
+import streamlit as st
+from dotenv import load_dotenv
+
+load_dotenv()
+
+from src.ui.auth import password_matches
 
 API_BASE = os.getenv("API_BASE", "http://localhost:8000").rstrip("/")
+if not API_BASE.startswith(("http://", "https://")):
+    API_BASE = f"https://{API_BASE}"
+API_KEY = os.getenv("ORBIT_API_KEY", "")
+API_HEADERS = {"Authorization": f"Bearer {API_KEY}"} if API_KEY else {}
+UI_PASSWORD = os.getenv("ORBIT_UI_PASSWORD")
+ORBIT_ENV = os.getenv("ORBIT_ENV", "development").strip().lower()
+
 
 def reset_job_state():
     st.session_state.job_id = None
@@ -12,12 +25,14 @@ def reset_job_state():
     st.session_state.thread_active = [False]
     st.session_state.stream_thread = None
 
+
 @st.cache_data(ttl=60)
 def check_health(api_base: str):
     try:
-        return requests.get(f"{api_base}/health", timeout=2).json()
-    except Exception:
+        return requests.get(f"{api_base}/health", timeout=5).json()
+    except requests.RequestException:
         return None
+
 
 st.set_page_config(
     page_title="ORBIT — Deep Research Engine",
@@ -28,7 +43,23 @@ st.set_page_config(
 st.title("🔬 ORBIT — Deep Research Engine")
 st.caption("Multi-agent research pipeline: Planner → Researcher → Critic → Writer")
 
-# ── Sidebar ───────────────────────────────────────────────────────────────────
+if ORBIT_ENV == "production" and not UI_PASSWORD:
+    st.error("ORBIT_UI_PASSWORD must be configured for the production UI.")
+    st.stop()
+
+if UI_PASSWORD and not st.session_state.get("ui_authenticated", False):
+    with st.form("orbit_login"):
+        st.subheader("Private ORBIT access")
+        submitted_password = st.text_input("Access password", type="password")
+        submitted = st.form_submit_button("Sign in")
+    if submitted:
+        if password_matches(submitted_password, UI_PASSWORD):
+            st.session_state.ui_authenticated = True
+            st.rerun()
+        else:
+            st.error("Incorrect access password.")
+    st.stop()
+
 with st.sidebar:
     st.header("Settings")
     depth = st.selectbox(
@@ -43,9 +74,10 @@ with st.sidebar:
     if health:
         st.success(f"API online — v{health.get('version', '?')}")
     else:
-        st.error("API offline — run uvicorn first")
+        st.error("API offline — check API_BASE and API deployment")
+    if not API_KEY:
+        st.error("ORBIT_API_KEY is not configured for the UI service.")
 
-# Initialize session state keys
 if "job_id" not in st.session_state:
     st.session_state.job_id = None
 if "query" not in st.session_state:
@@ -57,8 +89,6 @@ if "thread_active" not in st.session_state:
 if "stream_thread" not in st.session_state:
     st.session_state.stream_thread = None
 
-# ── Main input ────────────────────────────────────────────────────────────────
-# Show query input only if no job is active
 if not st.session_state.job_id:
     query = st.text_area(
         "Research query",
@@ -66,159 +96,187 @@ if not st.session_state.job_id:
         placeholder="e.g. What are the latest breakthroughs in protein folding AI?",
         height=100,
     )
-    
+
     if st.button("🚀 Start Research", type="primary", disabled=not query.strip()):
         try:
-            resp = requests.post(
+            response = requests.post(
                 f"{API_BASE}/research",
                 json={"query": query.strip(), "depth": depth},
-                timeout=10,
+                headers=API_HEADERS,
+                timeout=15,
             )
-            resp.raise_for_status()
-            job = resp.json()
+            response.raise_for_status()
+            job = response.json()
             st.session_state.job_id = job["job_id"]
             st.session_state.query = query.strip()
             st.rerun()
-        except Exception as e:
-            st.error(f"Failed to submit job: {e}")
+        except requests.RequestException as exc:
+            st.error(f"Failed to submit job: {exc}")
 
 else:
-    # A job is active! Show its status and progress.
     job_id = st.session_state.job_id
     st.info(f"Active Job ID: `{job_id}`")
-    
-    # Check status
+
     try:
-        status_resp = requests.get(f"{API_BASE}/jobs/{job_id}/status", timeout=5).json()
-        current_status = status_resp.get("status", "unknown")
-    except Exception as e:
-        st.error(f"Error fetching status: {e}")
+        status_response = requests.get(
+            f"{API_BASE}/jobs/{job_id}/status",
+            headers=API_HEADERS,
+            timeout=10,
+        )
+        status_response.raise_for_status()
+        status_data = status_response.json()
+        current_status = status_data.get("status", "unknown")
+    except requests.RequestException as exc:
+        st.error(f"Error fetching job status: {exc}")
         if st.button("🔄 Reset / Start New"):
             reset_job_state()
             st.rerun()
         st.stop()
-        
+
     if current_status in ("pending", "running"):
         st.subheader("📡 Real-time Research Logs")
-        
-        # Start background stream collector if not active
+
         if not st.session_state.thread_active[0]:
             st.session_state.logs = []
             st.session_state.thread_active = [True]
-            
-            def log_collector(jid, logs_list, active_flag):
+
+            def log_collector(job, logs_list, active_flag):
                 try:
                     import json
-                    url = f"{API_BASE}/jobs/{jid}/stream"
-                    with requests.get(url, stream=True, timeout=30) as r:
-                        for line in r.iter_lines():
+
+                    with requests.get(
+                        f"{API_BASE}/jobs/{job}/stream",
+                        headers=API_HEADERS,
+                        stream=True,
+                        timeout=(10, 45),
+                    ) as response:
+                        response.raise_for_status()
+                        for line in response.iter_lines():
                             if not active_flag[0]:
                                 break
                             if line:
                                 decoded = line.decode("utf-8").strip()
                                 if decoded.startswith("data:"):
-                                    payload_str = decoded[5:].strip()
-                                    if payload_str:
+                                    payload_text = decoded[5:].strip()
+                                    if payload_text:
                                         try:
-                                            payload = json.loads(payload_str)
+                                            payload = json.loads(payload_text)
                                             if payload.get("type") == "log":
                                                 logs_list.append(payload.get("message"))
-                                        except Exception:
-                                            pass
-                except Exception:
+                                        except (ValueError, TypeError):
+                                            continue
+                except requests.RequestException:
                     pass
                 finally:
                     active_flag[0] = False
-            
-            t = threading.Thread(
-                target=log_collector, 
-                args=(job_id, st.session_state.logs, st.session_state.thread_active),
-                daemon=True
-            )
-            t.start()
-            st.session_state.stream_thread = t
 
-        # Render the accumulated logs
+            thread = threading.Thread(
+                target=log_collector,
+                args=(
+                    job_id,
+                    st.session_state.logs,
+                    st.session_state.thread_active,
+                ),
+                daemon=True,
+            )
+            thread.start()
+            st.session_state.stream_thread = thread
+
         if st.session_state.logs:
-            terminal_text = "\n".join(st.session_state.logs)
-            st.code(terminal_text, language="text")
+            st.code("\n".join(st.session_state.logs), language="text")
         else:
             st.info("Waiting for logs from research worker...")
-            
+
         time.sleep(1)
         st.rerun()
-        
+
     elif current_status == "awaiting_human":
         st.warning("⚡ Human-in-the-Loop: Review Required")
-        hil = status_resp.get("hil_payload", {}) or {}
-        st.markdown(f"**Iteration {hil.get('iteration', '?')}/{hil.get('max_iterations', '?')} — Critic found research gaps:**")
+        hil = status_data.get("hil_payload", {}) or {}
+        st.markdown(
+            f"**Iteration {hil.get('iteration', '?')}/"
+            f"{hil.get('max_iterations', '?')} — Critic found research gaps:**"
+        )
         for gap in hil.get("gaps", []):
             st.markdown(f"• {gap}")
-            
+
         expires_at = hil.get("expires_at")
         if expires_at:
             st.caption(f"⏱ Auto-finalizes at {expires_at} (UTC) if no response")
-            
-        col_a, col_b = st.columns(2)
-        with col_a:
+
+        col_continue, col_finalize = st.columns(2)
+        with col_continue:
             if st.button("🔍 Continue Researching", type="primary"):
                 try:
-                    resp = requests.post(f"{API_BASE}/jobs/{job_id}/decision", json={"decision": "continue"}, timeout=5)
-                    resp.raise_for_status()
+                    response = requests.post(
+                        f"{API_BASE}/jobs/{job_id}/decision",
+                        json={"decision": "continue"},
+                        headers=API_HEADERS,
+                        timeout=10,
+                    )
+                    response.raise_for_status()
                     st.success("Routing back to Researcher...")
                     time.sleep(1)
                     st.rerun()
-                except Exception as e:
-                    st.error(f"Failed to send decision: {e}")
-        with col_b:
+                except requests.RequestException as exc:
+                    st.error(f"Failed to send decision: {exc}")
+        with col_finalize:
             if st.button("✍️ Finalize Now"):
                 try:
-                    resp = requests.post(f"{API_BASE}/jobs/{job_id}/decision", json={"decision": "finalize"}, timeout=5)
-                    resp.raise_for_status()
+                    response = requests.post(
+                        f"{API_BASE}/jobs/{job_id}/decision",
+                        json={"decision": "finalize"},
+                        headers=API_HEADERS,
+                        timeout=10,
+                    )
+                    response.raise_for_status()
                     st.success("Skipping to Writer...")
                     time.sleep(1)
                     st.rerun()
-                except Exception as e:
-                    st.error(f"Failed to send decision: {e}")
-                    
+                except requests.RequestException as exc:
+                    st.error(f"Failed to send decision: {exc}")
+
     elif current_status == "failed":
         st.error("❌ Research job failed.")
         if st.button("🔄 Reset / Start New"):
             reset_job_state()
             st.rerun()
-            
+
     elif current_status == "complete":
         st.success("✅ Research complete!")
-        
-        # Fetch results
         try:
-            result_resp = requests.get(f"{API_BASE}/jobs/{job_id}/result", timeout=10).json()
-        except Exception as e:
-            st.error(f"Failed to fetch result: {e}")
+            result_response = requests.get(
+                f"{API_BASE}/jobs/{job_id}/result",
+                headers=API_HEADERS,
+                timeout=15,
+            )
+            result_response.raise_for_status()
+            result_data = result_response.json()
+        except requests.RequestException as exc:
+            st.error(f"Failed to fetch result: {exc}")
             st.stop()
-            
-        # Display metrics
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Status", result_resp.get("status", "?").upper())
-        col2.metric("Research iterations", result_resp.get("agent_turns", "?"))
-        col3.metric("Sources found", len(result_resp.get("sources") or []))
-        
+
+        col_status, col_iterations, col_sources = st.columns(3)
+        col_status.metric("Status", result_data.get("status", "?").upper())
+        col_iterations.metric("Research iterations", result_data.get("agent_turns", "?"))
+        col_sources.metric("Sources found", len(result_data.get("sources") or []))
+
         st.subheader("📄 Research Report")
-        report = result_resp.get("report", "")
+        report = result_data.get("report", "")
         if report:
             st.markdown(report)
         else:
             st.warning("No report content returned.")
-            
-        sources = result_resp.get("sources") or []
+
+        sources = result_data.get("sources") or []
         if sources:
             with st.expander(f"🔗 Sources ({len(sources)})"):
-                for i, url in enumerate(sources, 1):
-                    st.markdown(f"{i}. {url}")
-                    
-        col_down, col_reset = st.columns([3, 1])
+                for index, url in enumerate(sources, 1):
+                    st.markdown(f"{index}. {url}")
+
+        col_download, col_reset = st.columns([3, 1])
         if report:
-            with col_down:
+            with col_download:
                 st.download_button(
                     label="⬇️ Download report as Markdown",
                     data=report,

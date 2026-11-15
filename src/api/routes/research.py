@@ -6,10 +6,11 @@ import time
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from sse_starlette.sse import EventSourceResponse
 
 from src.api.limiter import limiter
+from src.api.security import require_api_key
 from src.api.models import (
     HILDecisionRequest,
     HILStatusResponse,
@@ -31,7 +32,7 @@ from src.services.research_runner import (
 )
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_api_key)])
 
 _DEPTH_ESTIMATES = {
     "quick": 20,
@@ -61,8 +62,6 @@ def _schedule_hil_timeout(job_id: str, expires_at: str) -> None:
                 if not job or job["status"] != "awaiting_human":
                     return
 
-            # The DB claim arbitrates against human decisions and other
-            # timeout/recovery workers. Exactly one caller can resume.
             if claim_hil_decision(job_id, "auto_finalize"):
                 _run_research_resume(job_id, "finalize")
 
@@ -121,12 +120,7 @@ async def create_research_job(
 
     job_id = str(uuid.uuid4())
     create_job(job_id, query, body.depth)
-    background_tasks.add_task(
-        _run_research,
-        job_id,
-        query,
-        body.depth,
-    )
+    background_tasks.add_task(_run_research, job_id, query, body.depth)
 
     return ReasearchJobResponse(
         job_id=job_id,
@@ -135,17 +129,11 @@ async def create_research_job(
     )
 
 
-@router.get(
-    "/jobs/{job_id}/status",
-    response_model=HILStatusResponse,
-)
+@router.get("/jobs/{job_id}/status", response_model=HILStatusResponse)
 def get_job_status(job_id: str):
     job = get_job(job_id)
     if not job:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Job {job_id} not found",
-        )
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
     hil_payload = (
         get_hil_payload(job_id)
@@ -169,13 +157,8 @@ async def submit_job_decision(
     background_tasks: BackgroundTasks,
 ):
     if not get_job(job_id):
-        raise HTTPException(
-            status_code=404,
-            detail=f"Job {job_id} not found",
-        )
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
-    # Claim first, then enqueue the resume. A simultaneous timeout or
-    # duplicate request will receive False and cannot resume the graph.
     claimed = claim_hil_decision(job_id, body.decision)
     if not claimed:
         raise HTTPException(
@@ -186,11 +169,7 @@ async def submit_job_decision(
             ),
         )
 
-    background_tasks.add_task(
-        _run_research_resume,
-        job_id,
-        body.decision,
-    )
+    background_tasks.add_task(_run_research_resume, job_id, body.decision)
     return {
         "job_id": job_id,
         "status": "running",
@@ -202,10 +181,7 @@ async def submit_job_decision(
 async def stream_job_events(job_id: str, request: Request):
     """Stream progress events; always unsubscribe when the client disconnects."""
     if not get_job(job_id):
-        raise HTTPException(
-            status_code=404,
-            detail=f"Job {job_id} not found",
-        )
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
     queue = stream_manager.subscribe(job_id)
 
@@ -213,10 +189,7 @@ async def stream_job_events(job_id: str, request: Request):
         try:
             while not await request.is_disconnected():
                 try:
-                    data = await asyncio.wait_for(
-                        queue.get(),
-                        timeout=15.0,
-                    )
+                    data = await asyncio.wait_for(queue.get(), timeout=15.0)
                     yield {
                         "event": "message",
                         "data": json.dumps(data, default=str),
@@ -229,17 +202,11 @@ async def stream_job_events(job_id: str, request: Request):
     return EventSourceResponse(event_generator())
 
 
-@router.get(
-    "/jobs/{job_id}/result",
-    response_model=JobResultResponse,
-)
+@router.get("/jobs/{job_id}/result", response_model=JobResultResponse)
 def get_job_result(job_id: str):
     job = get_job(job_id)
     if not job:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Job {job_id} not found",
-        )
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
     result_data = {}
     if job.get("result"):
