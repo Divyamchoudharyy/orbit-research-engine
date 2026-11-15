@@ -40,6 +40,7 @@ services:
     dockerfilePath: ./Dockerfile
     dockerCommand: python -m streamlit run src/ui/streamlit_app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true
     plan: starter
+    healthCheckPath: /_stcore/health
     envVars:
       - key: API_BASE
         fromService:
