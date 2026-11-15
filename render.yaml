@@ -17,7 +17,7 @@ services:
       - key: ORBIT_ENV
         value: production
       - key: ORBIT_API_KEY
-        sync: false
+        generateValue: true
       - key: DATABASE_URL
         fromDatabase:
           name: orbit-postgres
@@ -52,7 +52,10 @@ services:
           type: web
           envVarKey: RENDER_EXTERNAL_URL
       - key: ORBIT_API_KEY
-        sync: false
+        fromService:
+          name: orbit-api
+          type: web
+          envVarKey: ORBIT_API_KEY
       - key: ORBIT_UI_PASSWORD
         sync: false
       - key: ORBIT_ENV
