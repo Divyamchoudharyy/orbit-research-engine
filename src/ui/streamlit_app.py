@@ -4,6 +4,9 @@ import time
 
 import requests
 import streamlit as st
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from src.ui.auth import password_matches
 
