@@ -57,29 +57,29 @@ def _prepare_findings_text(findings: list[str], max_chars: int = MAX_FINDINGS_CH
     if not normalized:
         return "No research findings were collected."
 
-    # Keep early and late evidence represented when the accumulated state is large.
+    # Represent both early and recent evidence instead of allowing early long
+    # findings to consume the entire prompt budget.
     ordered = normalized
+    omitted = 0
     if len(normalized) > 12:
         ordered = normalized[:6] + normalized[-6:]
+        omitted = len(normalized) - len(ordered)
 
+    slot_size = max(1, max_chars // len(ordered))
     sections = []
     remaining = max_chars
-    omitted = 0
 
     for index, finding in enumerate(ordered, start=1):
-        if remaining <= 0:
-            omitted += 1
-            continue
-
         prefix = f"[Finding {index}] "
-        available = remaining - len(prefix)
+        available = min(slot_size - len(prefix), remaining - len(prefix))
         if available <= 0:
             omitted += 1
             continue
 
         excerpt = finding
         if len(excerpt) > available:
-            excerpt = excerpt[: max(0, available - 24)].rstrip() + " [excerpt truncated]"
+            marker = " [excerpt truncated]"
+            excerpt = excerpt[:max(0, available - len(marker))].rstrip() + marker
             omitted += 1
 
         section = prefix + excerpt
@@ -87,12 +87,11 @@ def _prepare_findings_text(findings: list[str], max_chars: int = MAX_FINDINGS_CH
         remaining -= len(section) + 2
 
     if omitted:
-        note = f"[Context budget: {omitted} finding(s) or trailing text omitted. Treat the included evidence as partial.]"
+        note = f"[Context budget: {omitted} finding(s) or portions omitted. Included evidence is partial.]"
         if len(note) <= remaining:
             sections.append(note)
 
     return "\n\n".join(sections)
-
 
 def _prepare_sources(raw_sources: list[str]) -> list[str]:
     """Deduplicate and bound the source list while preserving original order."""
