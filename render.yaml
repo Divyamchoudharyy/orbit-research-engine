@@ -2,7 +2,7 @@ databases:
   - name: orbit-postgres
     databaseName: orbit
     user: orbit
-    plan: 0.1c-256mb
+    plan: free
 
 services:
   - type: web
@@ -10,7 +10,7 @@ services:
     runtime: docker
     dockerfilePath: ./Dockerfile
     dockerCommand: python -m uvicorn src.api.main:app --host 0.0.0.0 --port $PORT --workers 1
-    plan: 0.5c-512mb
+    plan: free
     autoDeployTrigger: checksPass
     healthCheckPath: /ready
     envVars:
@@ -43,7 +43,7 @@ services:
     runtime: docker
     dockerfilePath: ./Dockerfile
     dockerCommand: python -m streamlit run src/ui/streamlit_app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true
-    plan: 0.5c-512mb
+    plan: free
     autoDeployTrigger: checksPass
     healthCheckPath: /_stcore/health
     envVars:

@@ -1,14 +1,28 @@
 # ORBIT Deployment Guide
 
-This guide configures ORBIT as a **single-instance, authenticated deployment**. It is suitable for a private portfolio demo or controlled staging environment. It is not a horizontally scalable production architecture.
+This guide configures ORBIT as a **free-tier, single-instance demo deployment** on Render. It is suitable for trying the app and portfolio demonstrations, not reliable or permanent production use.
 
 ## Services
 
 - **FastAPI**: accepts research requests, runs the LangGraph workflow, serves status/results and SSE.
 - **Streamlit**: browser UI; sends a Bearer API key to the API.
-- **PostgreSQL**: durable storage for job records and LangGraph checkpoints.
+- **PostgreSQL**: stores job records and LangGraph checkpoints.
 
 The API intentionally runs with one Uvicorn worker. The current background-job runner and SSE fan-out are process-local, so do not scale the API horizontally or move jobs to separate Celery workers without first implementing a durable queue and shared event transport.
+
+## Free-tier limitations — read before deploying
+
+The Render Blueprint sets all three resources to the free plan. Render's free tier has important constraints:
+
+- Free web services spin down after 15 minutes without inbound traffic. The next request can take about a minute while the service starts.
+- Free web services have ephemeral filesystems. Local file changes are lost on restart, spin-down, or redeploy. ORBIT must use PostgreSQL for persisted job/checkpoint data; do not rely on local SQLite or uploaded files.
+- A free Render Postgres database is limited to 1 GB and expires 30 days after creation. It has no backups and no managed connection pooling. After expiration, there is a 14-day grace period to upgrade before Render deletes the database and its data.
+- Only one free Postgres database can be active in a workspace at a time.
+- Free web services share a 750 instance-hour monthly allowance per workspace. Spun-down services do not consume instance hours. Outbound bandwidth and build minutes also have monthly included limits.
+- Render may restart free resources or suspend free services that initiate unusually high outbound traffic. ORBIT calls external Groq and Tavily APIs, so usage should remain modest.
+- Free services are for testing/hobby use, not production reliability or guaranteed uptime.
+
+Check Render's current free-instance documentation before deployment: https://render.com/docs/free
 
 ## Required secrets
 
@@ -31,14 +45,15 @@ Optional tracing variables: `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT`, and `LANGS
 
 ## Render Blueprint
 
-The root `render.yaml` describes two web services and a managed PostgreSQL database. Both services use Render's `checksPass` auto-deploy trigger so deploys wait for repository CI checks to pass.
+The root `render.yaml` describes two free web services and one free managed PostgreSQL database. Both web services use Render's `checksPass` auto-deploy trigger so deploys wait for repository CI checks to pass.
 
-1. Push the deployment branch and create a Render Blueprint from this repository.
-2. Configure the prompted secrets. Render generates `ORBIT_API_KEY` on the API service and references that same value in the UI. Set `ORBIT_UI_PASSWORD` only on `orbit-ui`.
-3. Set `GROQ_API_KEY` and `TAVILY_API_KEY` on `orbit-api`.
-4. Review the database and service plans/costs before applying the Blueprint.
-5. Wait for the API `/ready` health check and Streamlit service to become healthy.
-6. Open the Streamlit service URL and submit a short Quick research query.
+1. Connect the GitHub repository and select the `main` branch.
+2. Create a Blueprint from the repository root, using `render.yaml`.
+3. Configure the prompted secrets. Render generates `ORBIT_API_KEY` on the API service and references that same value in the UI. Set `ORBIT_UI_PASSWORD` only on `orbit-ui`.
+4. Set `GROQ_API_KEY` and `TAVILY_API_KEY` on `orbit-api`.
+5. Confirm all three resources show the Free plan before applying the Blueprint. Do not select paid plans if the goal is a zero-cost deployment.
+6. Wait for the API `/ready` health check and Streamlit service to become healthy.
+7. Open the Streamlit service URL and submit a short Quick research query.
 
 The UI's `API_BASE` and the API's allowed CORS origin are linked to each service's Render-assigned public URL. The UI adds the Bearer token to API requests. `/health` and `/ready` remain unauthenticated for platform health probes; all research/job endpoints require the API key.
 
@@ -67,7 +82,7 @@ Compose uses PostgreSQL with a named persistent volume. The development fallback
 5. Confirm status moves through pending/running to complete (or awaiting_human).
 6. If the job pauses for HIL, test both Continue Researching and Finalize Now.
 7. Fetch the result and verify report text and source URLs.
-8. Restart the API and verify completed jobs remain available in PostgreSQL.
+8. Remember that free Postgres expires after 30 days; export any data you need before expiration or upgrade the database.
 
 ## Operational boundaries
 
@@ -77,5 +92,4 @@ Compose uses PostgreSQL with a named persistent volume. The development fallback
 - HIL timeout recovery is process-local plus startup recovery. It is not a distributed scheduler.
 - SSE events are process-local. Keep one API instance and one worker process.
 - Live Groq/Tavily provider behavior, provider quotas, latency, and research quality must be validated with real credentials.
-- Back up PostgreSQL and configure provider-side monitoring/alerts before relying on this for important work.
-- Do not describe this architecture as highly available or horizontally scalable.
+- Do not describe this architecture as highly available, horizontally scalable, or permanently free.
