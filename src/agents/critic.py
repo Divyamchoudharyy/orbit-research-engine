@@ -191,7 +191,7 @@ def critic_node(state: ResearchState) -> dict:
         raise RuntimeError("GROQ_API_KEY is not configured.")
 
     llm = ChatGroq(
-        model="llama-3.3-70b-versatile",
+        model="openai/gpt-oss-120b",
         api_key=api_key,
         temperature=0,
     )
